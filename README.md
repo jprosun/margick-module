@@ -9,7 +9,7 @@
 margick-modules/
   composer.json            ← path repository → packages/*
   packages/
-    margick-commerce/      ← module core: Money + Discount engine + seam contracts
+    margick-commerce/      ← commerce core: order + discount + voucher + payment mechanics
     (margick-booking/ …)   ← thêm dần khi extract
 ```
 
@@ -25,9 +25,12 @@ margick-modules/
 Template **khai báo** (link) version trong manifest → `build-template.sh` **copy** package vào `wp-content/mu-plugins/` của container → bake vào image. Trên platform: standalone, không link.
 
 ## Trạng thái
-- `margick-commerce` **v0.1.0** — Money (multi-currency, VND-correct) + DiscountEngine (extract từ edu `mgk_quote`: headline → loyalty/voucher stack → cap → GST) + seam contracts (PricingResolver / FulfillmentHandler / PaymentGateway, định nghĩa trước, cài sau).
+- `margick-commerce` **v0.4.0** — Money + DiscountEngine + Stripe mechanics +
+  order schema/repository + voucher validator and atomic reservation/redemption ledger.
+- `margick-booking` **v0.1.0** — pure slot/block math; DB hold/resource schema vẫn đợi ngành thứ hai xác nhận seam.
 
 ## Test
 ```
 php packages/margick-commerce/tests/DiscountEngineTest.php   # pure PHP, không cần composer/WP
+php packages/margick-commerce/tests/VoucherValidatorTest.php # pure voucher rules
 ```
