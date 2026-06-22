@@ -1,0 +1,20 @@
+{
+  "name": "margick/booking",
+  "description": "Margick Booking — crosscut booking domain (slot/block math). Reused by edu/beauty/fnb; installed per-template, never forced. Conceptually depends on margick/commerce (core).",
+  "type": "library",
+  "version": "0.1.0",
+  "license": "proprietary",
+  "require": {
+    "php": ">=8.1"
+  },
+  "autoload": {
+    "psr-4": {
+      "Margick\\Booking\\": "src/"
+    }
+  },
+  "autoload-dev": {
+    "psr-4": {
+      "Margick\\Booking\\Tests\\": "tests/"
+    }
+  }
+}

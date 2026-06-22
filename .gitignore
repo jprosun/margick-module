@@ -1,0 +1,8 @@
+/.agents/
+/.codex/
+/vendor/
+**/vendor/
+.env
+.env.*
+!.env.example
+.DS_Store

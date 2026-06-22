@@ -1,0 +1,23 @@
+{
+  "name": "margick/commerce",
+  "description": "Margick Commerce — reusable, industry-agnostic commerce domain (Money, Discount engine, Stripe payment mechanics, seam contracts). Pure PHP domain + thin WP adapters.",
+  "type": "library",
+  "version": "0.2.0",
+  "license": "proprietary",
+  "require": {
+    "php": ">=8.1"
+  },
+  "autoload": {
+    "psr-4": {
+      "Margick\\Commerce\\": "src/"
+    },
+    "files": [
+      "src/bootstrap.php"
+    ]
+  },
+  "autoload-dev": {
+    "psr-4": {
+      "Margick\\Commerce\\Tests\\": "tests/"
+    }
+  }
+}

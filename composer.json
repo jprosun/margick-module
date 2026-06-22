@@ -1,0 +1,14 @@
+{
+  "name": "margick/modules",
+  "description": "Margick shared-module monorepo. One source of truth for reusable PHP commerce/industry modules that the template build bakes (vendors) into each standalone WP container.",
+  "type": "project",
+  "license": "proprietary",
+  "repositories": [
+    { "type": "path", "url": "packages/*" }
+  ],
+  "require": {
+    "margick/commerce": "*"
+  },
+  "minimum-stability": "dev",
+  "prefer-stable": true
+}
