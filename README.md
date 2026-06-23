@@ -25,8 +25,9 @@ margick-modules/
 Template **khai báo** (link) version trong manifest → `build-template.sh` **copy** package vào `wp-content/mu-plugins/` của container → bake vào image. Trên platform: standalone, không link.
 
 ## Trạng thái
-- `margick-commerce` **v0.4.0** — Money + DiscountEngine + Stripe mechanics +
-  order schema/repository + voucher validator and atomic reservation/redemption ledger.
+- `margick-commerce` **v0.5.0** — Money + DiscountEngine + Stripe mechanics +
+  order schema/repository + voucher lifecycle, explicit campaign cap policy and
+  atomic reservation/redemption ledger.
 - `margick-booking` **v0.1.0** — pure slot/block math; DB hold/resource schema vẫn đợi ngành thứ hai xác nhận seam.
 
 ## Test

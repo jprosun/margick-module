@@ -34,7 +34,8 @@ final class Voucher
         public readonly bool $firstOrderOnly = false,
         public readonly array $appliesTo = [],
         public readonly ?\DateTimeImmutable $startsAt = null,
-        public readonly ?\DateTimeImmutable $endsAt = null
+        public readonly ?\DateTimeImmutable $endsAt = null,
+        public readonly bool $respectGlobalCap = false
     ) {}
 
     public static function normalizeCode(string $code): string

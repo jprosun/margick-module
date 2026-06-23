@@ -3,8 +3,8 @@
  * DiscountEngine — generic stacking + cap + GST (PURE DOMAIN, no WordPress).
  * =========================================================================
  * Faithful port of the COMBINATION logic in the edu mgk_quote():
- *   headline (advertised, uncapped) → loyalty/voucher EXTRAs (stacked under a
- *   cap on the advertised price) → GST breakout. The voucher-vs-loyalty
+ *   headline (advertised, uncapped) → loyalty under the global cap, plus a
+ *   voucher under its campaign policy → GST breakout. The voucher-vs-loyalty
  *   "best for the customer" rule (BR-11) is preserved.
  *
  * What is NOT here (stays in the industry module, fed in via QuoteRequest):
@@ -37,7 +37,7 @@ final class DiscountEngine
             $advertised = $req->base->sub($req->headline->amount);
         }
 
-        // EXTRA discounts (loyalty + voucher) stack on the advertised price, under the cap.
+        // Loyalty uses the global cap; each voucher explicitly opts in or out of it.
         $chosen     = $this->chooseExtras($req);
         $capAmount  = $advertised->percentage($req->capPct);
         $running    = $advertised;
@@ -46,14 +46,26 @@ final class DiscountEngine
 
         foreach ($chosen as $d) {
             $amt = $d->amount;
-            if ($stackTaken->add($amt)->greaterThan($capAmount)) {
-                $amt    = $capAmount->sub($stackTaken); // clamp to remaining headroom
-                $capped = true;
+            $isVoucher = $req->voucher !== null && $d === $req->voucher;
+            $usesGlobalCap = ! $isVoucher || $req->voucherCapped;
+
+            if ($usesGlobalCap) {
+                $remainingCap = $capAmount->sub($stackTaken);
+                if ($amt->greaterThan($remainingCap)) {
+                    $amt    = $remainingCap;
+                    $capped = true;
+                }
+            }
+            // Independent discounts can never reduce the charge below zero.
+            if ($amt->greaterThan($running)) {
+                $amt = Money::ofMinor($running->minor(), $currency);
             }
             if ($amt->isZero()) {
                 continue;
             }
-            $stackTaken = $stackTaken->add($amt);
+            if ($usesGlobalCap) {
+                $stackTaken = $stackTaken->add($amt);
+            }
             $running    = $running->sub($amt);
             $line       = new DiscountLine($d->key, $d->label, $d->pct, $amt);
             $applied[]  = $line;
@@ -85,6 +97,12 @@ final class DiscountEngine
             // voucher wins (matches the edu mgk_quote semantics).
             $loyaltyTotal = array_reduce($loyalty, static fn (int $c, DiscountLine $l) => $c + $l->amount->minor(), 0);
             return $loyaltyTotal > $voucher->amount->minor() ? $loyalty : [$voucher];
+        }
+
+        // An independent campaign gets its configured value first. This keeps a
+        // 100% voucher visibly 100%; later loyalty lines stop when the order is zero.
+        if ($voucher !== null && $req->voucherStackable && ! $req->voucherCapped) {
+            return \array_merge([$voucher], $loyalty);
         }
 
         $chosen = $loyalty;

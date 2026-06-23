@@ -38,6 +38,7 @@ $voucher = static function (array $data = []) use ($at): Voucher {
         'minOrderMinor' => 0,
         'maxDiscountMinor' => null,
         'stackable' => false,
+        'respectGlobalCap' => false,
         'usageLimit' => null,
         'usageLimitPerCustomer' => null,
         'customerKey' => null,

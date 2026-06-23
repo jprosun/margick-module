@@ -7,7 +7,7 @@ namespace Margick\Commerce\Wp;
 /** Versioned custom tables owned by the reusable voucher capability. */
 final class VoucherSchema
 {
-    public const SCHEMA_VERSION = '1.0.1';
+    public const SCHEMA_VERSION = '1.1.0';
     public const VERSION_OPTION = 'mgk_voucher_schema_version';
 
     /** @param 'vouchers'|'redemptions' $key */
@@ -42,6 +42,7 @@ final class VoucherSchema
             min_order_minor BIGINT UNSIGNED NOT NULL DEFAULT 0,
             max_discount_minor BIGINT UNSIGNED NULL,
             stackable TINYINT(1) NOT NULL DEFAULT 0,
+            respect_global_cap TINYINT(1) NOT NULL DEFAULT 0,
             usage_limit INT UNSIGNED NULL,
             usage_limit_per_customer INT UNSIGNED NULL,
             customer_key VARCHAR(190) NULL,

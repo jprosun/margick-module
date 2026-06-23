@@ -28,6 +28,7 @@ final class QuoteRequest
         public readonly int $capPct = 25,            // ceiling on stacked EXTRA discounts (% of advertised)
         public readonly int $gstPct = 0,
         public readonly bool $gstInclusive = true,
-        public readonly string $lineLabel = 'Item'
+        public readonly string $lineLabel = 'Item',
+        public readonly bool $voucherCapped = false // explicit opt-in: voucher shares the global EXTRA cap
     ) {}
 }

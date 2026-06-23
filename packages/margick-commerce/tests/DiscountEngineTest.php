@@ -121,5 +121,62 @@ $r9 = $eng->quote(new QuoteRequest(
 $check('stack.total',     $r9->total->toMajor(), 30.00);
 $check('stack.both',      count($keys($r9)) === 2, true);
 
+// Case 10 — merchant voucher is NOT silently limited by the loyalty/global cap.
+$packageLoyalty = [
+    new DiscountLine('sibling', 'Sibling', 5, Money::ofMajor(16, 'SGD')),
+    new DiscountLine('returning', 'Returning', 5, Money::ofMajor(16, 'SGD')),
+];
+$freeVoucher = new DiscountLine('voucher:FREE', 'Voucher FREE', 100, Money::ofMajor(320, 'SGD'));
+$r10 = $eng->quote(new QuoteRequest(
+    base: Money::ofMajor(800, 'SGD'),
+    headline: new DiscountLine('headline:package', 'Package', 60, Money::ofMajor(480, 'SGD')),
+    loyalty: $packageLoyalty,
+    voucher: $freeVoucher,
+    voucherStackable: true,
+    voucherCapped: false,
+    capPct: 25,
+    lineLabel: 'Package'
+));
+$voucherAmount = static function ($result, string $key): float {
+    foreach ($result->applied as $line) {
+        if ($line->key === $key) return $line->amount->toMajor();
+    }
+    return -1.0;
+};
+$check('free.total', $r10->total->toMajor(), 0.00);
+$check('free.voucher.full', $voucherAmount($r10, 'voucher:FREE'), 320.00);
+$check('free.loyalty.stops', count(array_intersect(['sibling', 'returning'], $keys($r10))), 0);
+$check('free.not.capped', $r10->capped, false);
+
+// Case 11 — a voucher can explicitly opt into the shared 25% cap.
+$r11 = $eng->quote(new QuoteRequest(
+    base: Money::ofMajor(800, 'SGD'),
+    headline: new DiscountLine('headline:package', 'Package', 60, Money::ofMajor(480, 'SGD')),
+    loyalty: $packageLoyalty,
+    voucher: $freeVoucher,
+    voucherStackable: true,
+    voucherCapped: true,
+    capPct: 25,
+    lineLabel: 'Package'
+));
+$check('free.capped.total', $r11->total->toMajor(), 240.00);
+$check('free.capped.amount', $voucherAmount($r11, 'voucher:FREE'), 48.00);
+$check('free.capped.flag', $r11->capped, true);
+
+// Case 12 — exclusive 100% voucher replaces loyalty and discounts advertised price fully.
+$r12 = $eng->quote(new QuoteRequest(
+    base: Money::ofMajor(800, 'SGD'),
+    headline: new DiscountLine('headline:package', 'Package', 60, Money::ofMajor(480, 'SGD')),
+    loyalty: $packageLoyalty,
+    voucher: $freeVoucher,
+    voucherStackable: false,
+    voucherCapped: false,
+    capPct: 25,
+    lineLabel: 'Package'
+));
+$check('free.exclusive.total', $r12->total->toMajor(), 0.00);
+$check('free.exclusive.amount', $voucherAmount($r12, 'voucher:FREE'), 320.00);
+$check('free.exclusive.loyalty', count(array_intersect(['sibling', 'returning'], $keys($r12))), 0);
+
 echo $fail ? "\n{$fail} FAILED\n" : "\nALL PASS\n";
 exit($fail ? 1 : 0);

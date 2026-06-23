@@ -46,6 +46,7 @@ try {
         'usage_limit' => 1,
         'usage_limit_per_customer' => 1,
         'applies_to' => ['edu_trial'],
+        'respect_global_cap' => true,
     ]);
     $secondId = VoucherRepository::upsert([
         'code' => 'MGKTEST5',
@@ -57,6 +58,7 @@ try {
     ]);
     $check('upsert first', $firstId > 0, true);
     $check('upsert second', $secondId > 0, true);
+    $check('cap policy persisted', VoucherRepository::findByCode('MGKTEST10')?->respectGlobalCap, true);
 
     $now = new DateTimeImmutable('2026-06-22 12:00:00', new DateTimeZone('UTC'));
     $ctx = new VoucherContext(Money::ofMinor(4000, 'SGD'), ['edu_trial'], 'parent@example.com', true, $now);

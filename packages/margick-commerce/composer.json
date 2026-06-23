@@ -2,7 +2,7 @@
   "name": "margick/commerce",
   "description": "Margick Commerce — reusable order, money, discount, voucher lifecycle and payment mechanics. Pure PHP domain plus thin WordPress persistence adapters.",
   "type": "library",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "license": "proprietary",
   "require": {
     "php": ">=8.1"
