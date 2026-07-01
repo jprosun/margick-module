@@ -40,5 +40,14 @@ final class SchemaMigrator
             VoucherSchema::install();
             \update_option(VoucherSchema::VERSION_OPTION, VoucherSchema::SCHEMA_VERSION);
         }
+
+        // Crosscut capability: booking (edu/spa/clinic scheduling). §3.1 order =
+        // core → crosscut → industry; booking FK-points at core so it migrates
+        // after the core tables above. Reuses the edu engine's existing version
+        // option so an already-shipped site at 0.7.0 runs no migration.
+        if (\get_option(BookingSchema::VERSION_OPTION) !== BookingSchema::SCHEMA_VERSION) {
+            BookingSchema::install();
+            \update_option(BookingSchema::VERSION_OPTION, BookingSchema::SCHEMA_VERSION);
+        }
     }
 }

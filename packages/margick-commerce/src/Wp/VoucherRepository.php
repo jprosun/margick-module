@@ -17,6 +17,54 @@ use Margick\Commerce\Voucher\Domain\VoucherValidator;
 final class VoucherRepository
 {
     /**
+     * Usage-counting policy for limit checks.
+     *
+     *  'consumed' (default) — a voucher counts against usage_limit /
+     *      usage_limit_per_customer ONLY once the order is PAID (redemption row
+     *      CONSUMED). Merely applying a code at checkout (a RESERVED hold) costs
+     *      nothing: the customer can apply it on another in-progress order, and
+     *      abandoning a hold frees it silently. This matches "a voucher is used
+     *      only when payment succeeds".
+     *
+     *  'active' — RESERVED holds also count (strict anti-oversell for globally
+     *      scarce codes). Reserved-then-abandoned still frees on expiry/release.
+     *
+     * A reservation still refreshes/replaces itself on the SAME reference
+     * regardless of policy (idempotent re-apply), and a fully CONSUMED order can
+     * never re-reserve — those guards live in reserve() and are policy-independent.
+     */
+    private static string $usagePolicy = 'consumed';
+
+    /** @param 'consumed'|'active' $policy */
+    public static function setUsagePolicy(string $policy): void
+    {
+        self::$usagePolicy = $policy === 'active' ? 'active' : 'consumed';
+    }
+
+    public static function usagePolicy(): string
+    {
+        return self::$usagePolicy;
+    }
+
+    /** Redemption statuses that count toward a usage limit, per the active policy. */
+    private static function countedStatusesSql(): string
+    {
+        return self::$usagePolicy === 'active'
+            ? "('RESERVED','CONSUMED')"
+            : "('CONSUMED')";
+    }
+
+    /** Whether a single redemption status is counted toward limits under the policy. */
+    private static function statusIsCounted(string $status): bool
+    {
+        $status = \strtoupper(\trim($status));
+        if ($status === 'CONSUMED') {
+            return true;
+        }
+        return $status === 'RESERVED' && self::$usagePolicy === 'active';
+    }
+
+    /**
      * Create or update a voucher by normalized code.
      * Monetary inputs are integer minor units; percentages are basis points.
      *
@@ -152,7 +200,11 @@ final class VoucherRepository
         $customerUsage = self::customerActiveUsageCount($voucher->id, $context->customerKey);
         if ($referenceType !== null && $referenceId !== null) {
             $existing = self::findActiveByReference($referenceType, $referenceId);
-            if (\is_array($existing) && (int) $existing['voucher_id'] === $voucher->id) {
+            // Exclude THIS order's own row from the tally so re-quoting an order
+            // that already holds/consumed this code doesn't count itself twice.
+            // Only rows whose status the policy actually counts are subtracted.
+            if (\is_array($existing) && (int) $existing['voucher_id'] === $voucher->id
+                && self::statusIsCounted((string) $existing['status'])) {
                 $usage--;
                 if (Voucher::normalizeCustomerKey((string) ($existing['customer_key'] ?? ''))
                     === Voucher::normalizeCustomerKey($context->customerKey)) {
@@ -181,10 +233,14 @@ final class VoucherRepository
         int $ttlSeconds = 900,
         string $idempotencyKey = '',
         array $metadata = [],
-        ?Money $appliedDiscount = null
+        ?Money $appliedDiscount = null,
+        bool $stacked = false
     ): array {
         global $wpdb;
-        $referenceKey = self::referenceKey($referenceType, $referenceId);
+        // Stacked mode scopes the active key to this specific code so multiple
+        // vouchers can hold reservations on one order; legacy mode (default) keeps
+        // the single-voucher per-order key so existing callers are unchanged.
+        $referenceKey = self::referenceKey($referenceType, $referenceId, $stacked ? $code : '');
         if ($referenceKey === '') {
             return self::failedReservation('invalid_reference', 'A voucher reference is required.');
         }
@@ -235,11 +291,14 @@ final class VoucherRepository
             }
 
             $sameReservation = \is_array($existing) && (int) $existing['voucher_id'] === $voucher->id;
-            $sameActiveReservation = $sameReservation
-                && \in_array((string) $existing['status'], ['RESERVED', 'CONSUMED'], true);
-            $usage = self::activeUsageCount($voucher->id) - ($sameActiveReservation ? 1 : 0);
+            // Only subtract this order's own row if the policy actually counted it,
+            // so a re-apply on the same order never double-counts (and, under the
+            // paid-only policy, a same-order unpaid hold was never counted anyway).
+            $sameCountedReservation = $sameReservation
+                && self::statusIsCounted((string) $existing['status']);
+            $usage = self::activeUsageCount($voucher->id) - ($sameCountedReservation ? 1 : 0);
             $customerUsage = self::customerActiveUsageCount($voucher->id, $context->customerKey);
-            if ($sameActiveReservation
+            if ($sameCountedReservation
                 && Voucher::normalizeCustomerKey((string) ($existing['customer_key'] ?? '')) === Voucher::normalizeCustomerKey($context->customerKey)) {
                 $customerUsage--;
             }
@@ -422,6 +481,104 @@ final class VoucherRepository
         return \is_array($row) ? $row : null;
     }
 
+    /* ── Stacked (multi-voucher per order) operations ─────────────────────────
+     * These act on ALL active vouchers of one order (reference), so a single
+     * order can carry several vouchers at once. They match by (reference_type,
+     * reference_id) rather than the single active key. Legacy single-voucher
+     * reserve/consume/release above are untouched. */
+
+    /** Release a SINGLE stacked voucher (by code) from an order's reservations. */
+    public static function releaseStacked(string $referenceType, string $referenceId, string $code, ?\DateTimeImmutable $now = null): bool
+    {
+        global $wpdb;
+        $key = self::referenceKey($referenceType, $referenceId, $code);
+        if ($key === '') {
+            return false;
+        }
+        $stamp = ($now ?? new \DateTimeImmutable('now', new \DateTimeZone('UTC')))
+            ->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d H:i:s');
+        $table = VoucherSchema::table('redemptions');
+        return $wpdb->query($wpdb->prepare(
+            "UPDATE {$table}
+             SET status = 'RELEASED', active_reference_key = NULL,
+                 released_at_utc = %s, updated_at_utc = %s
+             WHERE active_reference_key = %s AND status = 'RESERVED'",
+            $stamp,
+            $stamp,
+            $key
+        )) !== false;
+    }
+
+    /** Consume ALL reserved vouchers of an order (call on successful payment). */
+    public static function consumeAll(string $referenceType, string $referenceId, ?\DateTimeImmutable $now = null): int
+    {
+        global $wpdb;
+        $type = \strtolower((string) \preg_replace('/[^a-z0-9_-]/i', '', \trim($referenceType)));
+        $id   = \trim($referenceId);
+        if ($type === '' || $id === '') {
+            return 0;
+        }
+        $now ??= new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
+        self::expireReservations($now);
+        $stamp = $now->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d H:i:s');
+        $table = VoucherSchema::table('redemptions');
+        $changed = $wpdb->query($wpdb->prepare(
+            "UPDATE {$table}
+             SET status = 'CONSUMED', expires_at_utc = NULL, consumed_at_utc = %s, updated_at_utc = %s
+             WHERE reference_type = %s AND reference_id = %s AND status = 'RESERVED'",
+            $stamp,
+            $stamp,
+            $type,
+            $id
+        ));
+        return $changed === false ? 0 : (int) $changed;
+    }
+
+    /** Release ALL reserved vouchers of an order (call on abandonment/expiry). */
+    public static function releaseAll(string $referenceType, string $referenceId, ?\DateTimeImmutable $now = null): int
+    {
+        global $wpdb;
+        $type = \strtolower((string) \preg_replace('/[^a-z0-9_-]/i', '', \trim($referenceType)));
+        $id   = \trim($referenceId);
+        if ($type === '' || $id === '') {
+            return 0;
+        }
+        $stamp = ($now ?? new \DateTimeImmutable('now', new \DateTimeZone('UTC')))
+            ->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d H:i:s');
+        $table = VoucherSchema::table('redemptions');
+        $changed = $wpdb->query($wpdb->prepare(
+            "UPDATE {$table}
+             SET status = 'RELEASED', active_reference_key = NULL, released_at_utc = %s, updated_at_utc = %s
+             WHERE reference_type = %s AND reference_id = %s AND status = 'RESERVED'",
+            $stamp,
+            $stamp,
+            $type,
+            $id
+        ));
+        return $changed === false ? 0 : (int) $changed;
+    }
+
+    /** All still-active (RESERVED|CONSUMED) voucher rows for an order.
+     *  @return array<int,array<string,mixed>> */
+    public static function activeStackForReference(string $referenceType, string $referenceId): array
+    {
+        global $wpdb;
+        $type = \strtolower((string) \preg_replace('/[^a-z0-9_-]/i', '', \trim($referenceType)));
+        $id   = \trim($referenceId);
+        if ($type === '' || $id === '') {
+            return [];
+        }
+        $table = VoucherSchema::table('redemptions');
+        $rows = $wpdb->get_results($wpdb->prepare(
+            "SELECT * FROM {$table}
+             WHERE reference_type = %s AND reference_id = %s AND status IN ('RESERVED','CONSUMED')
+             ORDER BY id ASC",
+            $type,
+            $id
+        ), ARRAY_A);
+        return \is_array($rows) ? $rows : [];
+    }
+
     /** @return array{reserved:int,consumed:int,total_active:int} */
     public static function usageStats(string $code): array
     {
@@ -451,8 +608,9 @@ final class VoucherRepository
     {
         global $wpdb;
         $table = VoucherSchema::table('redemptions');
+        $statuses = self::countedStatusesSql();
         return (int) $wpdb->get_var($wpdb->prepare(
-            "SELECT COUNT(*) FROM {$table} WHERE voucher_id = %d AND status IN ('RESERVED','CONSUMED')",
+            "SELECT COUNT(*) FROM {$table} WHERE voucher_id = %d AND status IN {$statuses}",
             $voucherId
         ));
     }
@@ -465,9 +623,10 @@ final class VoucherRepository
             return 0;
         }
         $table = VoucherSchema::table('redemptions');
+        $statuses = self::countedStatusesSql();
         return (int) $wpdb->get_var($wpdb->prepare(
             "SELECT COUNT(*) FROM {$table}
-             WHERE voucher_id = %d AND customer_key = %s AND status IN ('RESERVED','CONSUMED')",
+             WHERE voucher_id = %d AND customer_key = %s AND status IN {$statuses}",
             $voucherId,
             $key
         ));
@@ -500,14 +659,27 @@ final class VoucherRepository
         );
     }
 
-    private static function referenceKey(string $type, string $id): string
+    /**
+     * The active-reservation identity. Historically one per order (type:id), which
+     * enforced a SINGLE voucher per order via the UNIQUE(active_reference_key)
+     * index. Passing a $stackCode scopes the key to (type:id:CODE) so DIFFERENT
+     * vouchers on the same order get DIFFERENT keys and can each hold an active
+     * reservation — while the SAME code on the same order still collides (dedupe /
+     * replace). Empty $stackCode preserves the exact legacy single-voucher key.
+     */
+    private static function referenceKey(string $type, string $id, string $stackCode = ''): string
     {
         $type = \strtolower((string) \preg_replace('/[^a-z0-9_-]/i', '', \trim($type)));
         $id = \trim($id);
         if ($type === '' || $id === '') {
             return '';
         }
-        return \substr($type . ':' . $id, 0, 190);
+        $key = $type . ':' . $id;
+        $code = Voucher::normalizeCode($stackCode);
+        if ($code !== '') {
+            $key .= ':' . $code;
+        }
+        return \substr($key, 0, 190);
     }
 
     private static function nullablePositiveInt(mixed $value): ?int

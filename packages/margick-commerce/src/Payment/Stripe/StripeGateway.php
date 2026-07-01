@@ -66,6 +66,50 @@ final class StripeGateway
     }
 
     /**
+     * Build POST /refunds params. PURE. amount drives Stripe smallest-unit via Money
+     * (correct for zero-decimal currencies). Caller never refunds more than captured —
+     * cap the Money before calling. metadata is mirrored onto the refund object.
+     *
+     * @param array<string,int|string> $metadata
+     * @return array<string,int|string>
+     */
+    public static function refundParams(string $paymentIntentId, Money $amount, array $metadata = []): array
+    {
+        $params = [
+            'payment_intent' => $paymentIntentId,
+            'amount'         => $amount->minor(),
+        ];
+        foreach ($metadata as $k => $v) {
+            $params["metadata[$k]"] = $v;
+        }
+        return $params;
+    }
+
+    /**
+     * Deterministic MOCK refund id (used when no live key). PURE. Same id shape the
+     * edu code already produced ('rf_mock_' + md5(ref:minor:seed)[0..18]) so the lift
+     * is byte-identical in mock mode.
+     *
+     * @return array{mode:string,refund_id:string}
+     */
+    public static function mockRefund(string $reference, int $minor, string $seed): array
+    {
+        return [
+            'mode'      => 'mock',
+            'refund_id' => 'rf_mock_' . substr(md5($reference . ':' . $minor . ':' . $seed), 0, 18),
+        ];
+    }
+
+    /**
+     * Idempotency key for a refund — stable per (reference, minor) so a retried
+     * refund of the same amount never double-refunds (matches the edu key shape).
+     */
+    public static function refundIdempotencyKey(string $reference, int $minor): string
+    {
+        return 'mgk_refund_' . $reference . '_' . $minor;
+    }
+
+    /**
      * Normalize a Stripe-style event into the fields fulfillment needs. PURE.
      * @param array<string,mixed> $event
      * @return array<string,mixed>

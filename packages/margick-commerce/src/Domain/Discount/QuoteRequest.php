@@ -17,18 +17,24 @@ use Margick\Commerce\Domain\Money;
 final class QuoteRequest
 {
     /**
-     * @param DiscountLine[] $loyalty  automatic discounts on the advertised price
+     * @param DiscountLine[] $loyalty   automatic discounts on the advertised price
+     * @param VoucherLine[]  $vouchers  stacked vouchers, each evaluated on the
+     *        running balance in order (percent takes its cut of what's left).
+     *        This is the multi-voucher path; the legacy single $voucher below is
+     *        kept for backward compatibility and, when set, is treated as the
+     *        first (and only) voucher via the legacy code path.
      */
     public function __construct(
         public readonly Money $base,                 // discountable base (e.g. rate, package base)
         public readonly ?DiscountLine $headline = null, // advertised discount — NOT capped (it is the price)
         public readonly array $loyalty = [],
-        public readonly ?DiscountLine $voucher = null,
+        public readonly ?DiscountLine $voucher = null,   // LEGACY single-voucher (still supported)
         public readonly bool $voucherStackable = false, // BR-11: non-stackable picks better-for-customer side
         public readonly int $capPct = 25,            // ceiling on stacked EXTRA discounts (% of advertised)
         public readonly int $gstPct = 0,
         public readonly bool $gstInclusive = true,
         public readonly string $lineLabel = 'Item',
-        public readonly bool $voucherCapped = false // explicit opt-in: voucher shares the global EXTRA cap
+        public readonly bool $voucherCapped = false, // explicit opt-in: voucher shares the global EXTRA cap
+        public readonly array $vouchers = []         // NEW: VoucherLine[] applied sequentially on the balance
     ) {}
 }

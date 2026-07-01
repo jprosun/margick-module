@@ -6,3 +6,4 @@
 .env.*
 !.env.example
 .DS_Store
+packages/margick-commerce/tests/_invoice_sample.pdf

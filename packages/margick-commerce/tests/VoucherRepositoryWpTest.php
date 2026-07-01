@@ -64,6 +64,24 @@ try {
     $ctx = new VoucherContext(Money::ofMinor(4000, 'SGD'), ['edu_trial'], 'parent@example.com', true, $now);
     $check('preview amount', VoucherRepository::preview('mgktest10', $ctx)->discount?->minor(), 400);
 
+    // ── Default policy: 'consumed' — only PAID redemptions count toward limits.
+    //    A RESERVED hold costs nothing, so applying the same code on a second
+    //    in-progress order (or re-applying) is allowed; ONLY a CONSUMED order
+    //    counts. This is the "a voucher is used only when payment succeeds" rule.
+    $check('default policy is consumed', VoucherRepository::usagePolicy(), 'consumed');
+    $holdA = VoucherRepository::reserve('MGKTEST10', $ctx, 'booking', 'paid-a', 900, 'paid-a-10');
+    $check('consumed-policy reserve A', $holdA['ok'], true);
+    $holdB = VoucherRepository::reserve('MGKTEST10', $ctx, 'booking', 'paid-b', 900, 'paid-b-10');
+    $check('consumed-policy 2nd HOLD allowed (limit 1)', $holdB['ok'], true); // RESERVED does not block
+    $check('consumed-policy consume A', VoucherRepository::consume('booking', 'paid-a', $now), true);
+    // A is now PAID → the single global use is spent; a fresh order is blocked.
+    $blockedPaid = VoucherRepository::reserve('MGKTEST10', $ctx, 'booking', 'paid-c', 900, 'paid-c-10');
+    $check('consumed-policy PAID blocks new order', $blockedPaid['reason'], 'usage_limit');
+    // Clean the consumed-policy fixtures before the strict-mode block reuses limits.
+    $wpdb->query("DELETE FROM {$redemptionTable} WHERE reference_id IN ('paid-a','paid-b','paid-c')");
+
+    // ── Strict anti-oversell policy: 'active' — RESERVED holds also count. ──
+    VoucherRepository::setUsagePolicy('active');
     $one = VoucherRepository::reserve('MGKTEST10', $ctx, 'booking', 'test-a', 900, 'test-a-10');
     $check('reserve first', $one['ok'], true);
     $check('reserved ledger count', VoucherRepository::usageStats('MGKTEST10')['reserved'], 1);
@@ -93,6 +111,7 @@ try {
     $replacement = VoucherRepository::reserve('MGKTEST5', $expiredCtx, 'booking', 'test-c', 900, 'test-c-5b');
     $check('reserve after expiry', $replacement['ok'], true);
 } finally {
+    VoucherRepository::setUsagePolicy('consumed'); // restore module default
     $cleanup();
 }
 
